@@ -17,6 +17,6 @@ public class CrashApp extends Application {
     public void onCreate() {
         super.onCreate();
         mCrashHandler = CrashHandler.getInstance();
-        mCrashHandler.init(this);
+        mCrashHandler.init(getApplicationContext());
     }
 }

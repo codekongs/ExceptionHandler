@@ -8,11 +8,9 @@ import android.os.Environment;
 import android.os.Looper;
 import android.os.Process;
 import android.text.TextUtils;
-import android.util.Log;
 import android.widget.Toast;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -23,6 +21,7 @@ import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -31,7 +30,7 @@ import java.util.Map;
  */
 
 public class CrashHandler implements Thread.UncaughtExceptionHandler {
-
+    private static final int WRITE_EXTERNAL_STORAGE_REQUEST_CODE = 0x100;
     //默认异常处理器
     private Thread.UncaughtExceptionHandler mDefaultHandler;
     //单例模式
@@ -40,14 +39,15 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
     //应用相关信息
     private Map<String, String> mAppInfo = new HashMap<>();
     //保存文件日期格式化
-    private DateFormat mDateFormat = new SimpleDateFormat();
+    private DateFormat mDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINESE);
 
-    private CrashHandler(){}
+    private CrashHandler() {
+    }
 
-    public static CrashHandler getInstance(){
-        if (mInstance == null){
-            synchronized (CrashHandler.class){
-                if (mInstance == null){
+    public static CrashHandler getInstance() {
+        if (mInstance == null) {
+            synchronized (CrashHandler.class) {
+                if (mInstance == null) {
                     mInstance = new CrashHandler();
                 }
             }
@@ -55,7 +55,7 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
         return mInstance;
     }
 
-    public void init(Context context){
+    public void init(Context context) {
         this.mContext = context;
         //获得默认异常处理器
         mDefaultHandler = Thread.getDefaultUncaughtExceptionHandler();
@@ -65,54 +65,58 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
 
     @Override
     public void uncaughtException(Thread thread, Throwable throwable) {
+
         //1.收集错误信息
         //2.保存错误信息
         //3.上传到服务器
-        if (!handleException(throwable)){
+        if (!handleException(throwable)) {
             //未处理,调用系统默认的处理器处理
-            if (mDefaultHandler != null){
+            if (mDefaultHandler != null) {
                 mDefaultHandler.uncaughtException(thread, throwable);
-            }else{
-                //已经人为处理了
-                try {
-                    //休眠一秒
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-
-                //退出程序
-                Process.killProcess(Process.myPid());
-                System.exit(1);
             }
+        } else {
+            //已经人为处理了
+            try {
+                //休眠一秒
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+
+            //退出程序
+            Process.killProcess(Process.myPid());
+            System.exit(1);
         }
     }
 
     /**
      * 手动处理异常
+     *
      * @param throwable
      * @return true:已经处理 false:未处理
      */
-    private boolean handleException(Throwable throwable){
-        if (throwable == null){
+    private boolean handleException(Throwable throwable) {
+
+        if (throwable == null) {
             return false;
         }
 
-        //在UI线程弹出Toast
-        new Thread(new Runnable() {
+        //在子线程弹出Toast
+        new Thread() {
             @Override
             public void run() {
                 Looper.prepare();
                 Toast.makeText(mContext, "程序貌似崩溃了", Toast.LENGTH_SHORT).show();
                 Looper.loop();
             }
-        }).start();
+        }.start();
 
         //收集错误信息
         collectErrorInfo();
-        //保存错误信息public
+
+        //保存错误信息
         saveErrorInfo(throwable);
-        return false;
+        return true;
     }
 
     /**
@@ -124,7 +128,7 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
         try {
             PackageInfo pi = pm.getPackageInfo(mContext.getPackageName(), PackageManager.GET_ACTIVITIES);
 
-            if (pi != null){
+            if (pi != null) {
                 String versionName = TextUtils.isEmpty(pi.versionName) ? "版本名称未设置" : pi.versionName;
                 String versionCode = pi.versionCode + "";
                 //存储信息到map
@@ -133,7 +137,7 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
             }
             //通过反射获取构建信息
             Field[] fields = Build.class.getFields();
-            if (fields != null && fields.length > 0){
+            if (fields != null && fields.length > 0) {
                 for (Field field : fields) {
                     field.setAccessible(true);
                     mAppInfo.put(field.getName(), field.get(null).toString());
@@ -148,28 +152,28 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
      * 保存错误信息
      */
     private void saveErrorInfo(Throwable throwable) {
+
         StringBuffer errorInfo = new StringBuffer();
-        for (Map.Entry<String, String> entry : mAppInfo.entrySet()){
+        for (Map.Entry<String, String> entry : mAppInfo.entrySet()) {
             String key = entry.getKey();
             String value = entry.getValue();
             errorInfo.append(key).append("=").append(value).append("\n");
         }
 
-        Writer writer = new StringWriter();
-        PrintWriter printWriter = new PrintWriter(writer);
+        Writer writer1 = new StringWriter();
+        PrintWriter printWriter = new PrintWriter(writer1);
         throwable.printStackTrace(printWriter);
         Throwable cause = throwable.getCause();
         //一直写直到写完
-        int i = 0;
-        while (cause != null){
-
-            Log.e("ABCDE", "saveErrorInfo: " + (i++) + "  " + cause.toString());
+        while (cause != null) {
             cause.printStackTrace(printWriter);
-            cause = throwable.getCause();
+            cause = cause.getCause();
         }
+
+
         printWriter.close();
 
-        String result = writer.toString();
+        String result = writer1.toString();
         errorInfo.append(result);
 
         //当前时间
@@ -179,36 +183,35 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
         String fileName = "crash-" + time + "-" + curTime + ".log";
 
         //判断是否有SD卡
-        if (Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED)){
+        if (Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED)) {
             //存在SD卡
-            String filePath = "/sdcard/crash/";
+            String filePath = Environment.getExternalStorageDirectory().getPath()
+                    + File.separator + "crash" + File.separator;
+
 
             File fileDir = new File(filePath);
-            if (!fileDir.exists()){
+            if (!fileDir.exists()) {
                 //文件夹不存在则创建(可创建多级文件夹)
                 fileDir.mkdirs();
             }
-
             //写错误信息到文件
             FileOutputStream fos = null;
             try {
-                fos = new FileOutputStream(filePath + fileName);
+                fos = new FileOutputStream(filePath + File.separator + fileName);
+
                 fos.write(errorInfo.toString().getBytes());
-            } catch (FileNotFoundException e) {
-                e.printStackTrace();
+                fos.flush();
             } catch (IOException e) {
                 e.printStackTrace();
             } finally {
-                if (fos != null){
-                    try {
+                try {
+                    if (fos != null) {
                         fos.close();
-                    } catch (IOException e) {
-                        e.printStackTrace();
                     }
+                } catch (IOException e) {
+                    e.printStackTrace();
                 }
             }
         }
-
-
     }
 }
